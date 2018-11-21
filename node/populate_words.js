@@ -46,26 +46,26 @@ pool.getConnection(function (err, con) {
 
                     result.forEach(function (content, key) {
                         if (err) throw err;
-                        let words = content['text'].toString().match(/([A-Za-z]+)/g);
-                        if(words)
-                            words = words.map(stemmer);
+                        if (content['text'].length !== 0) {
+                            let words = content['text'].toString().match(/([A-Za-z]+)/g).map(stemmer);
 
-                        bri_pool.getConnection(function (err, bri_con) {
-                            words.forEach(function (el, key) {
-                                if (err) throw err;
-                                bri_con.query('INSERT IGNORE INTO word (word) VALUES ("' + el + '"); SELECT IF(LAST_INSERT_ID() != 0, LAST_INSERT_ID(), (SELECT id FROM word WHERE word = "' + el + '")) AS id', function (err, res) {
-                                        bri_con.release();
-                                        if (err) throw err;
-                                        let word_id = res[1][0].id;
-
-                                        bri_con.query('INSERT IGNORE INTO rlContentWord (contentId,wordId) VALUES (' + content['id'] + ',' + word_id + ') ON DUPLICATE KEY UPDATE fij = fij + 1', function (err, res) {
+                            bri_pool.getConnection(function (err, bri_con) {
+                                words.forEach(function (el, key) {
+                                    if (err) throw err;
+                                    bri_con.query('INSERT IGNORE INTO word (word) VALUES ("' + el + '"); SELECT IF(LAST_INSERT_ID() != 0, LAST_INSERT_ID(), (SELECT id FROM word WHERE word = "' + el + '")) AS id', function (err, res) {
                                             bri_con.release();
                                             if (err) throw err;
-                                        });
-                                    }
-                                );
+                                            let word_id = res[1][0].id;
+
+                                            bri_con.query('INSERT IGNORE INTO rlContentWord (contentId,wordId) VALUES (' + content['id'] + ',' + word_id + ') ON DUPLICATE KEY UPDATE fij = fij + 1', function (err, res) {
+                                                bri_con.release();
+                                                if (err) throw err;
+                                            });
+                                        }
+                                    );
+                                });
                             });
-                        });
+                        }
                     })
                 });
 
