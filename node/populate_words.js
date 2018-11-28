@@ -10,45 +10,42 @@ let bri_pool = mysql.createPool({
     multipleStatements: true
 });
 
-let limit = 200;
+let limit = 10;
 let word_x_id_hashmap = {};
 
-let get_word_id = function (word) {
+let get_word_id = async function (word) {
     return new Promise(function (resolve, reject) {
         if (word_x_id_hashmap.hasOwnProperty(word)) {
             //console.log("Cache word hit: (" + word_x_id_hashmap[word] + "," + word + ")");
             resolve(word_x_id_hashmap[word]);
         } else {
             bri_pool.getConnection(function (err, con) {
-                if (err) {
-                    reject(err);
-                } else {
-                    con.query('INSERT IGNORE INTO word (word) VALUES ("' + word + '"); SELECT IF(LAST_INSERT_ID() != 0, LAST_INSERT_ID(), (SELECT id FROM word WHERE word = "' + word + '")) AS id', function (err, res) {
-                            con.release();
-                            if (err) reject(err);
-                            //console.log("Inserted word: (" + res[1][0].id + "," + word + ")");
-                            word_x_id_hashmap[word] = res[1][0].id;
-                            resolve(res[1][0].id);
-                        }
-                    );
-                }
+                if (err) throw err;
+                con.query('INSERT IGNORE INTO word (word) VALUES ("' + word + '"); SELECT id FROM word WHERE word = "' + word + '"', function (err, res) {
+                        con.release();
+                        if (err) reject(err);
+                        //console.log("Inserted word: (" + res[1][0].id + "," + word + ")");
+                        word_x_id_hashmap[word] = res[1][0].id;
+                        resolve(res[1][0].id);
+                    }
+                );
+
             });
         }
     })
 };
 
-let insert_relation = function (word_id, article_id) {
+let insert_relation = async function (word_id, article_id) {
     return new Promise(function (resolve, reject) {
         bri_pool.getConnection(function (err, con) {
             if (err) {
                 con.release();
-                reject(err);
+                if (err) throw err;
             } else {
-
                 con.query('INSERT IGNORE INTO rlContentWord (contentId,wordId) VALUES (' + article_id + ',' + word_id + ') ON DUPLICATE KEY UPDATE fij = fij + 1', function (err, res) {
                     con.release();
-                    if (err) reject(err);
-                    //console.log("Inserted relation");
+                    if (err) throw err;
+                    resolve(res);
                 });
             }
         });
@@ -59,23 +56,23 @@ let get_article_count = new Promise((resolve, reject) => {
     bri_pool.getConnection(function (err, con) {
         if (err) {
             con.release();
-            reject(err);
+            if (err) throw err;
         } else {
             con.query('SELECT COUNT(*) FROM content', function (err, res) {
                 con.release();
-                if (err) reject(err);
+                if (err) throw err;
                 resolve(res[0]['COUNT(*)']);
             });
         }
     });
 });
 
-let get_articles = function (offset) {
+let get_articles = async function (offset) {
     return new Promise((resolve, reject) => {
         bri_pool.getConnection(function (err, con) {
             if (err) {
                 con.release();
-                reject(err);
+                if (err) throw err;
             } else {
                 con.query(
                     'SELECT * FROM content LIMIT ' + limit + ' OFFSET ' + offset
@@ -88,25 +85,18 @@ let get_articles = function (offset) {
     });
 };
 
-let process_word = function (word, article_id) {
-    return get_word_id(word).then(word_id => {
-        insert_relation(word_id, article_id).catch(function (err) {
-            console.log('Insert rel err: ' + err);
-            process_word(word, article_id);
-        });
-    }).catch(function (err) {
-        console.log('Get word id err: ' + err);
-        process_word(word, article_id);
-    });
-};
 
-let process_articles = function (articles) {
+let process_articles = async function (articles) {
     articles.forEach(function (article) {
         console.log("Processing: " + article['title']);
         if (article['text'].length !== 0) {
             let words = article['text'].toString().match(/([A-Za-z]+)/g).map(stemmer);
             words.forEach(function (word) {
-                process_word(word, article['id']);
+                get_word_id(word).then(word_id => {
+                    insert_relation(word_id, article['id']).then(value => {
+                        //console.log("Inserted (" + word + ", " + word_id + ") => ("+article['id']+". "+article['title']+")");
+                    });
+                });
             });
         }
     });
