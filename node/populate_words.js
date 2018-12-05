@@ -1,8 +1,8 @@
 let mysql = require('mysql');
-let stemmer = require('stemmer')
+let stemmer = require('stemmer');
 
 let bri_pool = mysql.createPool({
-    connectionLimit: 100,
+    connectionLimit: 120,
     host: "127.0.0.1",
     user: "wiki",
     password: "wiki123wikia",
@@ -23,7 +23,7 @@ let get_word_id = async function (word) {
                 if (err) throw err;
                 con.query('INSERT IGNORE INTO word (word) VALUES ("' + word + '"); SELECT id FROM word WHERE word = "' + word + '"', function (err, res) {
                         con.release();
-                        if (err) reject(err);
+                        if (err) throw err;
                         //console.log("Inserted word: (" + res[1][0].id + "," + word + ")");
                         word_x_id_hashmap[word] = res[1][0].id;
                         resolve(res[1][0].id);
@@ -77,6 +77,7 @@ let get_articles = async function (offset) {
                 con.query(
                     'SELECT * FROM content LIMIT ' + limit + ' OFFSET ' + offset
                     , function (err, result) {
+                        con.release();
                         if (err) throw err;
                         resolve(result);
                     });
@@ -94,7 +95,7 @@ let process_articles = async function (articles) {
             words.forEach(function (word) {
                 get_word_id(word).then(word_id => {
                     insert_relation(word_id, article['id']).then(value => {
-                        //console.log("Inserted (" + word + ", " + word_id + ") => ("+article['id']+". "+article['title']+")");
+                        console.log("Inserted (" + word + ", " + word_id + ") => ("+article['id']+". "+article['title']+")");
                     });
                 });
             });
