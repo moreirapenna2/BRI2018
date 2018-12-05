@@ -115,7 +115,7 @@ get_article_count.then((article_count) => {
     process_all().then(value => {
         bri_pool.getConnection(function (err, con) {
             if (err) throw err;
-            con.query('UPDATE word A INNER JOIN (SELECT wordId, SUM(fij) AS cnt FROM rlContentWord GROUP BY wordId) B ON B.wordId = A.id SET A.ni = B.cnt;\n' +
+            con.query('UPDATE word A INNER JOIN (SELECT wordId, COUNT(wordId) AS cnt FROM rlContentWord GROUP BY wordId) B ON B.wordId = A.id SET A.ni = B.cnt;\n' +
                 'UPDATE rlContentWord A INNER JOIN (SELECT contentId, wordId, fij, wij, ((1 + log(2, fij)) * log(2, (SELECT COUNT(*) FROM content)/word.ni)) AS new_wij FROM rlContentWord INNER JOIN word ON rlContentWord.wordId = word.id) B ON B.wordId = A.wordId AND B.contentId = A.contentId SET A.wij = B.new_wij;\n',
                 function (err, res) {
                     console.log("Finished!");
