@@ -16,6 +16,7 @@ let get_words_count = async function () {
     return new Promise(function (resolve, reject) {
         bri_pool.getConnection(function (err, con) {
             con.query('SELECT w.id, w.word, count(*) FROM word w, rlContentWord cw WHERE w.id = cw.wordId GROUP BY w.id', function (err, res) {
+                con.release();
                 if (err) throw err;
                 res.forEach(function (el) {
                     g_word_x_doc_count[el['word']] = {id: el['id'], count: el['count(*)']};
@@ -30,6 +31,7 @@ let get_articles_containing_word = async function (word_id) {
     return new Promise(function (resolve, reject) {
         bri_pool.getConnection(function (err, con) {
             con.query('SELECT contentId, wij FROM rlContentWord WHERE wordId = ' + word_id + ' ORDER BY wij DESC', function (err, res) {
+                con.release();
                 if (err) throw err;
                 let ret = {};
                 res.forEach(function (el) {
@@ -45,6 +47,7 @@ let get_articles_content = async function (article_id) {
     return new Promise(function (resolve) {
         bri_pool.getConnection(function (err, con) {
             con.query('SELECT * FROM content WHERE id = ' + article_id, function (err, res) {
+                con.release();
                 if (err) throw err;
                 resolve(res[0]);
             });
