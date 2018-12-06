@@ -2,7 +2,8 @@ const readline = require('readline');
 let mysql = require('mysql');
 let stemmer = require('stemmer');
 
-let con = mysql.createConnection({
+let bri_pool = mysql.createPool({
+    connectionLimit: 120,
     host: "127.0.0.1",
     user: "wiki",
     password: "wiki123wikia",
@@ -13,34 +14,40 @@ let con = mysql.createConnection({
 let g_word_x_doc_count = {};
 let get_words_count = async function () {
     return new Promise(function (resolve, reject) {
-        con.query('SELECT w.id, w.word, count(*) FROM word w, rlContentWord cw WHERE w.id = cw.wordId GROUP BY w.id', function (err, res) {
-            if (err) throw err;
-            res.forEach(function (el) {
-                g_word_x_doc_count[el['word']] = {id: el['id'], count: el['count(*)']};
+        bri_pool.getConnection(function (err, con) {
+            con.query('SELECT w.id, w.word, count(*) FROM word w, rlContentWord cw WHERE w.id = cw.wordId GROUP BY w.id', function (err, res) {
+                if (err) throw err;
+                res.forEach(function (el) {
+                    g_word_x_doc_count[el['word']] = {id: el['id'], count: el['count(*)']};
+                });
+                resolve();
             });
-            resolve();
         });
     });
 };
 
 let get_articles_containing_word = async function (word_id) {
     return new Promise(function (resolve, reject) {
-        con.query('SELECT contentId, wij FROM rlContentWord WHERE wordId = ' + word_id + ' ORDER BY wij DESC', function (err, res) {
-            if (err) throw err;
-            let ret = {};
-            res.forEach(function (el) {
-                ret[el['contentId']] = el['wij'];
+        bri_pool.getConnection(function (err, con) {
+            con.query('SELECT contentId, wij FROM rlContentWord WHERE wordId = ' + word_id + ' ORDER BY wij DESC', function (err, res) {
+                if (err) throw err;
+                let ret = {};
+                res.forEach(function (el) {
+                    ret[el['contentId']] = el['wij'];
+                });
+                resolve(ret);
             });
-            resolve(ret);
         });
     })
 };
 
 let get_articles_content = async function (article_id) {
     return new Promise(function (resolve) {
-        con.query('SELECT * FROM content WHERE id = ' + article_id, function (err, res) {
-            if (err) throw err;
-            resolve(res[0]);
+        bri_pool.getConnection(function (err, con) {
+            con.query('SELECT * FROM content WHERE id = ' + article_id, function (err, res) {
+                if (err) throw err;
+                resolve(res[0]);
+            });
         });
     });
 };
