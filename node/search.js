@@ -1,6 +1,7 @@
 const readline = require('readline');
 let mysql = require('mysql');
 let stemmer = require('stemmer');
+let limit_by = 10;
 
 let bri_pool = mysql.createPool({
     connectionLimit: 120,
@@ -19,7 +20,13 @@ let get_words_count = async function () {
                 con.release();
                 if (err) throw err;
                 res.forEach(function (el) {
-                    g_word_x_doc_count[el['word']] = {id: el['id'], count: el['count(*)']};
+                    g_word_x_doc_count[el['word']] = {
+                        id: el['id'],
+                        count: el['count(*)'],
+                        content_x_wij_arr: [],
+                        content_x_wij_map: [],
+                        content_ids: []
+                    };
                 });
                 resolve();
             });
@@ -33,23 +40,32 @@ let get_articles_containing_word = async function (word_id) {
             con.query('SELECT contentId, wij FROM rlContentWord WHERE wordId = ' + word_id + ' ORDER BY wij DESC', function (err, res) {
                 con.release();
                 if (err) throw err;
-                let ret = {};
+                let content_rel = [];
+                let content_ids = [];
+                let content_x_word_map = {};
                 res.forEach(function (el) {
-                    ret[el['contentId']] = el['wij'];
+                    content_rel.push([el['contentId'], el['wij']]);
+                    content_x_word_map[el['contentId']] = el['wij'];
                 });
-                resolve(ret);
+                resolve({
+                    content_x_wij_arr: content_rel,//(content_id, wij)
+                    content_x_wij_map: content_x_word_map//(content_id => wij)
+                });
             });
         });
     })
 };
 
-let get_articles_content = async function (article_id) {
+let get_articles_content = async function (cid_x_wij_pair_arr) {
+    let content_ids = cid_x_wij_pair_arr.map(function (cid_x_wij_pair) {
+        return cid_x_wij_pair[0];
+    });
     return new Promise(function (resolve) {
         bri_pool.getConnection(function (err, con) {
-            con.query('SELECT * FROM content WHERE id = ' + article_id, function (err, res) {
+            con.query('SELECT * FROM content WHERE id IN (' + content_ids.join() + ') ORDER BY FIELD(id, ' + content_ids.join() + ');', function (err, res) {
                 con.release();
                 if (err) throw err;
-                resolve(res[0]);
+                resolve(res);
             });
         });
     });
@@ -60,71 +76,96 @@ const rl = readline.createInterface({
     output: process.stdout
 });
 
-rl.setPrompt('Search> ');
-rl.prompt();
 
-rl.on('line', function (answer) {
-    get_words_count().then(function () {
+console.log("Loading...");
 
+
+get_words_count().then(function () {
+    rl.setPrompt('Search> ');
+    rl.prompt();
+
+    rl.on('line', function (answer) {
+        if (answer === "") {
+            console.log("Please enter an valid search query");
+            rl.prompt();
+            return;
+        }
+
+        let search_start_time = Date.now();
         let words = answer.split(" ").map(stemmer);
-
         let words_x_doc_count = [];
-        words.forEach(word => {
-            words_x_doc_count.push(g_word_x_doc_count[word]);
-        });
+
+
+        for (let i = 0; i < words.length; i++) {
+            if(g_word_x_doc_count.hasOwnProperty(words[i])) {
+                words_x_doc_count.push(g_word_x_doc_count[words[i]]);
+            }else{
+                console.log("No results found (word " + words[i]+ " doesn't exists in our database)");
+                console.log("Search took: " + (Date.now() - search_start_time) + " ms");
+                rl.prompt();
+                return;
+            }
+        }
+
         words_x_doc_count.sort((a, b) => {
             return a.count - b.count;
         });
         //console.log(words_x_doc_count);
 
-
         let promises = [];
         words_x_doc_count.forEach(function (el) {
-            promises.push(get_articles_containing_word(el.id).then(function (word_x_content_rel) {
-                el.content_rel = word_x_content_rel;
+            promises.push(get_articles_containing_word(el.id).then(function (results) {
+                el.content_x_wij_arr = results.content_x_wij_arr;
+                el.content_x_wij_map = results.content_x_wij_map;
             }));
+
         });
         Promise.all(promises).then(function () {
-            let intersection = Object.keys(words_x_doc_count[0].content_rel).map(Number);
-            for (let i = 1; i < words_x_doc_count.length; i++) {
-                intersection = intersection.filter(value => -1 !== Object.keys(words_x_doc_count[i].content_rel).map(Number).indexOf(value));
-            }
 
-            Promise.all(intersection.map(get_articles_content)).then(content_data_array => {
-                let content_x_rating = {};
-                let content_data = {};
-                let i = 0;
-                intersection.forEach(content_id => {
-                    content_data[content_id] = content_data_array[i++];
-                    words_x_doc_count.forEach(word_x_doc_count => {
-                        if (content_x_rating.hasOwnProperty(content_id)) {
-                            content_x_rating[content_id] += word_x_doc_count.content_rel[content_id];
-                        } else {
-                            content_x_rating[content_id] = word_x_doc_count.content_rel[content_id];
+                //Filter intersection and calculate Wij sum
+                let intersection = words_x_doc_count[0].content_x_wij_arr;
+                for (let i = 1; i < words_x_doc_count.length; i++) {
+                    intersection = intersection.filter(function (cid_wij_pair) {
+                        if (words_x_doc_count[i].content_x_wij_map.hasOwnProperty(cid_wij_pair[0])) {
+                            //content IS in the new set
+                            cid_wij_pair[1] += words_x_doc_count[i].content_x_wij_map[cid_wij_pair[0]];
+                            return true;
                         }
+                        return false;
                     });
-                });
+                }
 
-                let content_x_rating_arr = Object.entries(content_x_rating);
+                if (intersection.length === 0) {
+                    console.log("No results found");
+                    console.log("Search took: " + (Date.now() - search_start_time) + " ms");
+                    rl.prompt();
+                    return;
+                }
 
-                content_x_rating_arr.sort((a, b) => {
+                intersection.sort((a, b) => {
                     return b[1] - a[1];
                 });
 
-                content_x_rating_arr.forEach(value => {
-                    let curr_content_data = content_data[value[0]];
-                    console.log("====");
-                    console.log("Title: " + curr_content_data.title.toString());
-                    console.log("URL: " + curr_content_data.url.toString());
-                    console.log("Rating: " + value[1]);
-                    console.log("====");
-                });
+                if (intersection.length > limit_by)
+                    intersection.length = limit_by;
 
-                rl.prompt();
-            });
-        });
+                get_articles_content(intersection).then(content_data_array => {
+                    let i = 0;
+                    intersection.forEach(cid_wij_pair => {
+                        let content_data = content_data_array[i++];//I know that content_data_array's order is sync'd with intersection's order
+
+                        console.log("====");
+                        console.log("Title: " + content_data.title.toString());
+                        console.log("URL: " + content_data.url.toString());
+                        console.log("Rating: " + cid_wij_pair[1]);
+                        console.log("====");
+                    });
+
+                    console.log("Search took: " + (Date.now() - search_start_time) + " ms");
+
+                    rl.prompt();
+                });
+            }
+        );
     });
-}).on('close', function () {
-    console.log('Exiting');
-    process.exit(0);
 });
